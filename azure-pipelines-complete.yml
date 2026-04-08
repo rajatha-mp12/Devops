@@ -1,0 +1,143 @@
+# Complete DevOps Pipeline — BCSL657D
+# Multi-stage pipeline integrating Maven, Gradle, Jenkins simulation, Ansible, and Azure deployment
+# Run in Azure DevOps with ubuntu-latest agents
+
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  MAVEN_CACHE_FOLDER: $(Pipeline.Workspace)/.m2/repository
+  MAVEN_OPTS: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)'
+  GRADLE_USER_HOME: $(Pipeline.Workspace)/.gradle
+
+stages:
+  - stage: Build_Maven
+    displayName: 'Build Maven Project'
+    jobs:
+      - job: Maven_Build
+        steps:
+          - task: Cache@2
+            inputs:
+              key: 'maven | "$(Agent.OS)" | experiment-02-maven/pom.xml'
+              restoreKeys: |
+                maven | "$(Agent.OS)"
+              path: $(MAVEN_CACHE_FOLDER)
+            displayName: 'Cache Maven dependencies'
+
+          - task: Maven@4
+            inputs:
+              mavenPomFile: 'experiment-02-maven/pom.xml'
+              goals: 'clean compile test package'
+              publishJUnitResults: true
+              testResultsFiles: '**/surefire-reports/TEST-*.xml'
+              javaHomeOption: 'JDKVersion'
+              jdkVersionOption: '1.17'
+            displayName: 'Maven Build & Test'
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: 'experiment-02-maven/target'
+              ArtifactName: 'maven-artifact'
+            displayName: 'Publish Maven Artifacts'
+
+  - stage: Build_Gradle
+    displayName: 'Build Gradle Project'
+    jobs:
+      - job: Gradle_Build
+        steps:
+          - task: Cache@2
+            inputs:
+              key: 'gradle | "$(Agent.OS)" | experiment-03-gradle/build.gradle'
+              restoreKeys: |
+                gradle | "$(Agent.OS)"
+              path: $(GRADLE_USER_HOME)
+            displayName: 'Cache Gradle dependencies'
+
+          - task: Gradle@3
+            inputs:
+              workingDirectory: 'experiment-03-gradle'
+              gradleWrapperFile: 'experiment-03-gradle/gradlew'
+              gradleOptions: '-Xmx3072m'
+              javaHomeOption: 'JDKVersion'
+              jdkVersionOption: '1.17'
+              publishJUnitResults: true
+              testResultsFiles: '**/TEST-*.xml'
+              tasks: 'clean build'
+            displayName: 'Gradle Build'
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: 'experiment-03-gradle/build/libs'
+              ArtifactName: 'gradle-artifact'
+            displayName: 'Publish Gradle Artifacts'
+
+  - stage: Deploy_Ansible
+    displayName: 'Deploy with Ansible'
+    dependsOn: [Build_Maven, Build_Gradle]
+    condition: succeeded()
+    jobs:
+      - job: Ansible_Deploy
+        steps:
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              downloadType: 'single'
+              artifactName: 'maven-artifact'
+              downloadPath: '$(System.ArtifactsDirectory)'
+
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              downloadType: 'single'
+              artifactName: 'gradle-artifact'
+              downloadPath: '$(System.ArtifactsDirectory)'
+
+          - script: |
+              sudo apt-get update -y
+              sudo apt-get install -y ansible
+            displayName: 'Install Ansible'
+
+          - script: |
+              cd experiment-07-ansible
+              ansible-playbook -i hosts.ini setup_webserver.yml --check
+            displayName: 'Ansible Dry Run'
+
+          - script: |
+              cd experiment-07-ansible
+              # Note: Update hosts.ini with actual server IPs for real deployment
+              ansible-playbook -i hosts.ini setup_webserver.yml -v
+            displayName: 'Ansible Deploy'
+
+  - stage: Release_Azure
+    displayName: 'Release to Azure'
+    dependsOn: Deploy_Ansible
+    condition: succeeded()
+    jobs:
+      - deployment: Azure_Deploy
+        environment: 'Production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: DownloadBuildArtifacts@0
+                  inputs:
+                    downloadType: 'single'
+                    artifactName: 'maven-artifact'
+                    downloadPath: '$(System.ArtifactsDirectory)'
+
+                - task: AzureWebApp@1
+                  inputs:
+                    azureSubscription: 'YOUR_AZURE_SUBSCRIPTION'  # Replace with your subscription
+                    appType: 'webAppLinux'
+                    appName: 'devops-bcsl657d-app'  # Replace with your app name
+                    package: '$(System.ArtifactsDirectory)/maven-artifact/*.jar'
+                    runtimeStack: 'JAVA|17-java17'</content>
+<parameter name="filePath">d:\class\azure-pipelines-complete.yml

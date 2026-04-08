@@ -1,0 +1,122 @@
+trigger:
+  branches:
+    include:
+      - master
+
+pool:
+  name: 'Default'
+  demands:
+    - agent.name -equals azure-poc
+
+variables:
+  MAVEN_CACHE_FOLDER: $(Pipeline.Workspace)/.m2/repository
+
+  registryName: 'devopspocacr'
+  repositoryName: 'backend-app'
+  tag: $(Build.BuildId)
+
+  azureSubscription: 'azure-service-conn'
+  resourceGroup: 'my-rg'
+  containerAppName: 'backend-app'
+
+  workingDir: 'experiment-02-maven'
+
+stages:
+
+# ================= BUILD =================
+- stage: Build
+  jobs:
+  - job: MavenBuild
+    steps:
+
+    - checkout: self
+
+    # ✅ Create cache folder (fix previous error)
+    - script: |
+        mkdir -p $(MAVEN_CACHE_FOLDER)
+      displayName: 'Create Maven Cache Directory'
+
+    # ✅ Cache dependencies
+    - task: Cache@2
+      inputs:
+        key: 'maven | "$(Agent.OS)" | $(workingDir)/pom.xml'
+        restoreKeys: |
+          maven | "$(Agent.OS)"
+        path: $(MAVEN_CACHE_FOLDER)
+
+    # ✅ Build project
+    - script: |
+        export MAVEN_OPTS="-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)"
+
+        echo "JAVA VERSION:"
+        java -version
+
+        echo "MAVEN VERSION:"
+        mvn -v
+
+        cd $(workingDir)
+        mvn clean package -DskipTests
+
+        echo "Checking JAR:"
+        ls -l target
+      displayName: 'Build Maven Project'
+
+    - task: PublishPipelineArtifact@1
+      inputs:
+        targetPath: '$(Build.SourcesDirectory)/$(workingDir)/target'
+        artifact: 'maven-target'
+      displayName: 'Publish Maven Build Artifact'
+
+# ================= DOCKER =================
+- stage: BuildAndPushDocker
+  dependsOn: Build
+  jobs:
+  - job: DockerBuild
+    steps:
+
+    - checkout: self
+
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        artifact: 'maven-target'
+        targetPath: '$(Build.SourcesDirectory)/$(workingDir)/target'
+      displayName: 'Download Maven Build Artifact'
+
+    # ✅ Azure login
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: $(azureSubscription)
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          az account show
+          az acr login --name $(registryName)
+
+    # ✅ FIXED Docker build (IMPORTANT CHANGE)
+    - script: |
+        cd $(workingDir)
+        docker build -t $(registryName).azurecr.io/$(repositoryName):$(tag) .
+      displayName: 'Build Docker Image'
+
+    # ✅ Push
+    - script: |
+        docker push $(registryName).azurecr.io/$(repositoryName):$(tag)
+      displayName: 'Push Docker Image'
+
+# ================= DEPLOY =================
+- stage: Deploy
+  dependsOn: BuildAndPushDocker
+  jobs:
+  - job: Deploy
+    steps:
+
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: $(azureSubscription)
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          az containerapp update \
+            --name $(containerAppName) \
+            --resource-group $(resourceGroup) \
+            --image $(registryName).azurecr.io/$(repositoryName):$(tag)

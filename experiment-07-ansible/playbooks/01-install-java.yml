@@ -1,0 +1,33 @@
+---
+- name: Install Java
+  hosts: all
+  become: yes
+  vars:
+    java_version: "17"
+    java_package: "openjdk-17-jdk"
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install Java
+      apt:
+        name: "{{ java_package }}"
+        state: present
+
+    - name: Set Java environment variables
+      lineinfile:
+        path: /etc/profile.d/java.sh
+        line: "export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64"
+        create: yes
+
+    - name: Verify Java installation
+      command: java -version
+      register: java_version_check
+      changed_when: false
+
+    - name: Display Java version
+      debug:
+        var: java_version_check.stderr

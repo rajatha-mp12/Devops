@@ -1,0 +1,48 @@
+---
+- name: Install Maven
+  hosts: all
+  become: yes
+  vars:
+    maven_version: "3.9.5"
+    maven_install_dir: "/opt/maven"
+
+  tasks:
+    - name: Download Maven
+      get_url:
+        url: "https://dlcdn.apache.org/maven/maven-3/{{ maven_version }}/binaries/apache-maven-{{ maven_version }}-bin.tar.gz"
+        dest: "/tmp/apache-maven-{{ maven_version }}-bin.tar.gz"
+        mode: '0644'
+
+    - name: Extract Maven
+      unarchive:
+        src: "/tmp/apache-maven-{{ maven_version }}-bin.tar.gz"
+        dest: "/opt"
+        remote_src: yes
+        creates: "{{ maven_install_dir }}"
+
+    - name: Create Maven symlink
+      file:
+        src: "/opt/apache-maven-{{ maven_version }}"
+        dest: "{{ maven_install_dir }}"
+        state: link
+
+    - name: Set Maven environment variables
+      lineinfile:
+        path: /etc/profile.d/maven.sh
+        line: "export MAVEN_HOME={{ maven_install_dir }}"
+        create: yes
+
+    - name: Add Maven to PATH
+      lineinfile:
+        path: /etc/profile.d/maven.sh
+        line: "export PATH=$PATH:$MAVEN_HOME/bin"
+        create: yes
+
+    - name: Verify Maven installation
+      command: mvn --version
+      register: maven_version_check
+      changed_when: false
+
+    - name: Display Maven version
+      debug:
+        var: maven_version_check.stdout

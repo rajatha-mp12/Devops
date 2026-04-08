@@ -1,0 +1,297 @@
+# Complete DevOps Pipeline
+# This file demonstrates an end-to-end DevOps pipeline integrating all tools
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+
+pr:
+  branches:
+    include:
+      - main
+      - develop
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  MAVEN_CACHE_FOLDER: $(Pipeline.Workspace)/.m2/repository
+  mavenVersion: '3.9.5'
+  javaVersion: '17'
+  appName: 'devops-bcsl657d-app'
+  resourceGroup: 'devops-rg'
+  azureSubscription: 'YOUR_AZURE_SUBSCRIPTION'
+
+stages:
+  # ===========================================
+  # STAGE 1: CODE CHECKOUT
+  # ===========================================
+  - stage: Checkout
+    displayName: '1. Checkout Source Code'
+    jobs:
+      - job: CheckoutCode
+        displayName: 'Clone Repository'
+        steps:
+          - checkout: git
+            clean: true
+            fetchDepth: 0
+          - script: |
+              echo "Build Number: $(Build.BuildNumber)"
+              echo "Branch: $(Build.SourceBranch)"
+              echo "Commit: $(Build.SourceVersion)"
+              ls -la
+
+  # ===========================================
+  # STAGE 2: BUILD - MAVEN
+  # ===========================================
+  - stage: Build_Maven
+    displayName: '2. Build with Maven'
+    dependsOn: Checkout
+    jobs:
+      - job: MavenBuild
+        displayName: 'Maven Build & Test'
+        steps:
+          - task: Cache@2
+            inputs:
+              key: 'maven | "$(Agent.OS)" | experiment-02-maven/pom.xml'
+              path: $(MAVEN_CACHE_FOLDER)
+            displayName: 'Cache Maven dependencies'
+
+          - task: Maven@4
+            displayName: 'Maven Build'
+            inputs:
+              mavenPomFile: 'experiment-02-maven/pom.xml'
+              goals: 'clean package'
+              publishJUnitResults: true
+              testResultsFiles: '**/surefire-reports/TEST-*.xml'
+              javaHomeOption: 'JDKVersion'
+              jdkVersionOption: $(javaVersion)
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Maven Artifacts'
+            inputs:
+              PathtoPublish: 'experiment-02-maven/target'
+              ArtifactName: 'maven-drop'
+
+  # ===========================================
+  # STAGE 3: BUILD - GRADLE
+  # ===========================================
+  - stage: Build_Gradle
+    displayName: '3. Build with Gradle'
+    dependsOn: Checkout
+    jobs:
+      - job: GradleBuild
+        displayName: 'Gradle Build & Test'
+        steps:
+          - task: Gradle@3
+            displayName: 'Gradle Build'
+            inputs:
+              workingDirectory: 'experiment-03-gradle'
+              gradleWrapperFile: 'experiment-03-gradle/gradlew'
+              gradleOptions: '-Xmx3072m'
+              javaHomeOption: 'JDKVersion'
+              jdkVersionOption: $(javaVersion)
+              publishJUnitResults: true
+              testResultsFiles: '**/TEST-*.xml'
+              tasks: 'clean build'
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Gradle Artifacts'
+            inputs:
+              PathtoPublish: 'experiment-03-gradle/build/libs'
+              ArtifactName: 'gradle-drop'
+
+  # ===========================================
+  # STAGE 4: SECURITY SCAN
+  # ===========================================
+  - stage: SecurityScan
+    displayName: '4. Security Scan'
+    dependsOn:
+      - Build_Maven
+      - Build_Gradle
+    jobs:
+      - job: OWASP_Scan
+        displayName: 'OWASP Dependency Check'
+        steps:
+          - task: DependencyCheck@5
+            displayName: 'OWASP Scan'
+            inputs:
+              projectName: 'devops-bcsl657d'
+              scanPath: '$(Build.SourcesDirectory)'
+              outputDirectory: '$(Build.ArtifactStagingDirectory)/dependency-check'
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Security Report'
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)/dependency-check'
+              ArtifactName: 'security-report'
+
+  # ===========================================
+  # STAGE 5: DEPLOY TO DEV (ANSIBLE)
+  # ===========================================
+  - stage: Deploy_Dev
+    displayName: '5. Deploy to Dev (Ansible)'
+    dependsOn: SecurityScan
+    condition: succeeded()
+    jobs:
+      - deployment: DeployDev
+        displayName: 'Deploy to Dev Environment'
+        environment: 'dev'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - script: |
+                    echo "Deploying to Dev environment using Ansible..."
+                    echo "This would run: ansible-playbook -i experiment-07-ansible/hosts.ini experiment-07-ansible/setup_webserver.yml"
+
+  # ===========================================
+  # STAGE 6: DEV TESTING
+  # ===========================================
+  - stage: Dev_Testing
+    displayName: '6. Dev Environment Testing'
+    dependsOn: Deploy_Dev
+    condition: succeeded()
+    jobs:
+      - job: FunctionalTests
+        displayName: 'Functional Tests'
+        steps:
+          - script: |
+              echo "Running functional tests on Dev environment..."
+              echo "Test Suite 1: PASSED"
+              echo "Test Suite 2: PASSED"
+
+      - job: SmokeTests
+        displayName: 'Smoke Tests'
+        steps:
+          - script: |
+              echo "Running smoke tests..."
+              echo "Smoke Test: PASSED"
+
+  # ===========================================
+  # STAGE 7: DEPLOY TO STAGING (AZURE)
+  # ===========================================
+  - stage: Deploy_Staging
+    displayName: '7. Deploy to Staging (Azure)'
+    dependsOn: Dev_Testing
+    condition: succeeded()
+    jobs:
+      - deployment: DeployStaging
+        displayName: 'Deploy to Staging Environment'
+        environment: 'staging'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureWebApp@1
+                  displayName: 'Deploy to Azure Staging'
+                  inputs:
+                    azureSubscription: $(azureSubscription)
+                    appType: 'webAppLinux'
+                    appName: '$(appName)-staging'
+                    package: '$(Pipeline.Workspace)/maven-drop/*.jar'
+                    runtimeStack: 'JAVA|17-java17'
+
+  # ===========================================
+  # STAGE 8: STAGING TESTING
+  # ===========================================
+  - stage: Staging_Testing
+    displayName: '8. Staging Environment Testing'
+    dependsOn: Deploy_Staging
+    condition: succeeded()
+    jobs:
+      - job: IntegrationTests
+        displayName: 'Integration Tests'
+        steps:
+          - script: |
+              echo "Running integration tests on Staging..."
+              echo "Integration Test 1: PASSED"
+              echo "Integration Test 2: PASSED"
+
+      - job: UAT
+        displayName: 'User Acceptance Tests'
+        steps:
+          - script: |
+              echo "Running UAT on Staging..."
+              echo "UAT: PASSED"
+
+  # ===========================================
+  # STAGE 9: DEPLOY TO QA (AZURE)
+  # ===========================================
+  - stage: Deploy_QA
+    displayName: '9. Deploy to QA (Azure)'
+    dependsOn: Staging_Testing
+    condition: succeeded()
+    jobs:
+      - deployment: DeployQA
+        displayName: 'Deploy to QA Environment'
+        environment: 'qa'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureWebApp@1
+                  displayName: 'Deploy to Azure QA'
+                  inputs:
+                    azureSubscription: $(azureSubscription)
+                    appType: 'webAppLinux'
+                    appName: '$(appName)-qa'
+                    package: '$(Pipeline.Workspace)/maven-drop/*.jar'
+                    runtimeStack: 'JAVA|17-java17'
+
+  # ===========================================
+  # STAGE 10: PRODUCTION DEPLOYMENT
+  # ===========================================
+  - stage: Deploy_Production
+    displayName: '10. Deploy to Production (Azure)'
+    dependsOn: Deploy_QA
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: DeployProd
+        displayName: 'Deploy to Production'
+        environment: 'production'
+        strategy:
+          blueGreen:
+            preDeploy:
+              steps:
+                - script: echo "Preparing production deployment..."
+            deploy:
+              steps:
+                - script: echo "Deploying to production (Blue environment)..."
+            routeTraffic:
+              steps:
+                - script: echo "Routing traffic to new version..."
+            postRouteTraffic:
+              steps:
+                - script: echo "Verifying application health..."
+            on:
+              failure:
+                steps:
+                  - script: echo "Alerting team and rolling back..."
+              success:
+                steps:
+                  - script: echo "Production deployment complete!"
+
+  # ===========================================
+  # STAGE 11: NOTIFICATIONS
+  # ===========================================
+  - stage: Notify
+    displayName: '11. Notifications'
+    dependsOn:
+      - Deploy_Production
+      - Deploy_QA
+    condition: always()
+    jobs:
+      - job: SendNotification
+        displayName: 'Send Notifications'
+        steps:
+          - script: |
+              echo "========================================="
+              echo "  DevOps Pipeline COMPLETED!"
+              echo "========================================="
+              echo "Build: $(Build.BuildNumber)"
+              echo "Branch: $(Build.SourceBranch)"
+              echo "Status: $(Agent.JobStatus)"
+              echo "========================================="

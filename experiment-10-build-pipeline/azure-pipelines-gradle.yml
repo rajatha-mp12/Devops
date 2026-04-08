@@ -1,0 +1,25 @@
+# azure-pipelines.yml — Gradle Build Pipeline
+trigger:
+  - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+  - task: Gradle@3
+    inputs:
+      workingDirectory: ''
+      gradleWrapperFile: 'experiment-03-gradle/gradlew'
+      gradleOptions: '-Xmx3072m'
+      javaHomeOption: 'JDKVersion'
+      jdkVersionOption: '1.17'
+      jdkArchitectureOption: 'x64'
+      publishJUnitResults: true
+      testResultsFiles: '**/TEST-*.xml'
+      tasks: 'clean build'
+    displayName: 'Gradle Build'
+
+  - task: PublishBuildArtifacts@1
+    inputs:
+      PathtoPublish: 'experiment-03-gradle/build/libs'
+      ArtifactName: 'gradle-artifact'

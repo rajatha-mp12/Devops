@@ -1,0 +1,120 @@
+pipeline {
+    agent any
+
+    environment {
+        APP_NAME = 'devops-maven-app'
+        BUILD_ENV = 'CI/CD'
+    }
+
+    tools {
+        maven 'Maven-3.9'
+        jdk 'JDK-17'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo 'Checking out source code...'
+                git branch: 'main',
+                    url: 'https://gitlab.com/devops-bcsl657d/course-practicals.git'
+            }
+        }
+
+        stage('Build with Maven') {
+            steps {
+                echo 'Building application with Maven...'
+                sh 'mvn clean package -DskipTests=false'
+            }
+            post {
+                always {
+                    junit '**/target/surefire-reports/*.xml'
+                }
+            }
+        }
+
+        stage('Build with Gradle') {
+            steps {
+                echo 'Building application with Gradle...'
+                sh 'cd experiment-03-gradle && chmod +x gradlew && ./gradlew clean build'
+            }
+            post {
+                always {
+                    junit '**/build/test-results/test/*.xml'
+                }
+            }
+        }
+
+        stage('Archive Artifacts') {
+            steps {
+                echo 'Archiving build artifacts...'
+                archiveArtifacts artifacts: 'experiment-02-maven/target/*.jar', fingerprint: true
+                archiveArtifacts artifacts: 'experiment-03-gradle/build/libs/*.jar', fingerprint: true
+            }
+        }
+
+        stage('Deploy with Ansible') {
+            steps {
+                echo 'Deploying to staging with Ansible...'
+                sh '''
+                    ansible-playbook \
+                      -i experiment-07-ansible/hosts.ini \
+                      experiment-07-ansible/setup_webserver.yml \
+                      --syntax-check
+                '''
+            }
+        }
+
+        stage('Deploy to Azure Dev') {
+            steps {
+                echo 'Deploying to Dev environment via Azure DevOps...'
+                sh 'echo "Azure Dev deployment placeholder"'
+            }
+        }
+
+        stage('Deploy to Azure QA') {
+            steps {
+                echo 'Deploying to QA environment via Azure DevOps...'
+                sh 'echo "Azure QA deployment placeholder"'
+            }
+            post {
+                success {
+                    echo 'QA deployment successful!'
+                }
+                failure {
+                    echo 'QA deployment failed!'
+                }
+            }
+        }
+
+        stage('Deploy to Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                echo 'Deploying to Production environment...'
+                sh 'echo "Azure Production deployment placeholder"'
+            }
+            post {
+                always {
+                    echo 'Pipeline execution completed!'
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '========================================='
+            echo '  DevOps Pipeline COMPLETED SUCCESSFULLY'
+            echo '========================================='
+        }
+        failure {
+            echo '========================================='
+            echo '  DevOps Pipeline FAILED'
+            echo '========================================='
+        }
+        always {
+            cleanWs()
+        }
+    }
+}

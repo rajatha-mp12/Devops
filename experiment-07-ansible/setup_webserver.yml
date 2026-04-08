@@ -1,0 +1,58 @@
+---
+- name: Setup Web Server
+  hosts: local
+  become: yes
+  vars:
+    app_port: 8080
+    app_dir: /opt/devops-app
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install required packages
+      apt:
+        name:
+          - openjdk-17-jdk
+          - nginx
+          - curl
+        state: present
+
+    - name: Create application directory
+      file:
+        path: '{{ app_dir }}'
+        state: directory
+        mode: '0755'
+
+    - name: Copy application JAR
+      copy:
+        src: target/devops-maven-app-1.0-SNAPSHOT.jar
+        dest: '{{ app_dir }}/app.jar'
+        mode: '0644'
+      ignore_errors: yes
+
+    - name: Create systemd service
+      template:
+        src: templates/app.service.j2
+        dest: /etc/systemd/system/devops-app.service
+      ignore_errors: yes
+
+    - name: Enable and start application service
+      systemd:
+        name: devops-app
+        enabled: yes
+        state: started
+        daemon_reload: yes
+      ignore_errors: yes
+
+    - name: Verify app is running
+      command: systemctl status devops-app
+      register: service_status
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Print status
+      debug:
+        var: service_status.stdout_lines

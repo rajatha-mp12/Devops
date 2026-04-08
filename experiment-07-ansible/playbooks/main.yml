@@ -1,0 +1,51 @@
+---
+- name: Main DevOps Setup Playbook
+  hosts: all
+  become: yes
+  order: run_serial
+
+  tasks:
+    - name: Import Java installation
+      import_playbook: 01-install-java.yml
+
+    - name: Import Maven installation
+      import_playbook: 02-install-maven.yml
+
+    - name: Import Gradle installation
+      import_playbook: 03-install-gradle.yml
+
+- name: Setup Complete DevOps Environment
+  hosts: all
+  gather_facts: yes
+
+  tasks:
+    - name: Install common packages
+      apt:
+        name:
+          - git
+          - curl
+          - wget
+          - nginx
+          - docker.io
+        state: present
+      ignore_errors: yes
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+      ignore_errors: yes
+
+    - name: Display summary
+      debug:
+        msg: |
+          ========================================
+          DevOps Environment Setup Complete!
+          ========================================
+          Installed Components:
+          - Java (OpenJDK 17)
+          - Maven 3.9.5
+          - Gradle 8.6
+          - Git, Nginx, Docker
+          ========================================

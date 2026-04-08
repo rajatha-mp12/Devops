@@ -1,0 +1,55 @@
+# Build artifacts
+target/
+build/
+dist/
+*.jar
+*.war
+*.ear
+
+# Gradle - keep wrapper files
+.gradle/
+gradle-app.setting
+!gradle/wrapper/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# Maven
+.m2/
+*.pom
+dependency-reduced-pom.xml
+
+# Jenkins
+.jenkins/
+*.log
+
+# Ansible
+*.retry
+__pycache__/
+
+# IDE
+.vscode/
+.idea/
+*.iml
+*.code-workspace
+.classpath
+.project
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+.env
+*.swp
+*.swo
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+~*
+
+# Old lab files (duplicate - should not be in repo)
+src/main/java/com/devops/lab/
+src/test/java/com/devops/lab/

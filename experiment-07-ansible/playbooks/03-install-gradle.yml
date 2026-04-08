@@ -1,0 +1,55 @@
+---
+- name: Install Gradle
+  hosts: all
+  become: yes
+  vars:
+    gradle_version: "8.6"
+    gradle_install_dir: "/opt/gradle"
+
+  tasks:
+    - name: Install wget and unzip
+      apt:
+        name:
+          - wget
+          - unzip
+        state: present
+
+    - name: Download Gradle
+      get_url:
+        url: "https://services.gradle.org/distributions/gradle-{{ gradle_version }}-bin.zip"
+        dest: "/tmp/gradle-{{ gradle_version }}-bin.zip"
+        mode: '0644'
+
+    - name: Extract Gradle
+      unarchive:
+        src: "/tmp/gradle-{{ gradle_version }}-bin.zip"
+        dest: "/opt"
+        remote_src: yes
+        creates: "{{ gradle_install_dir }}"
+
+    - name: Create Gradle symlink
+      file:
+        src: "/opt/gradle-{{ gradle_version }}"
+        dest: "{{ gradle_install_dir }}"
+        state: link
+
+    - name: Set Gradle environment variables
+      lineinfile:
+        path: /etc/profile.d/gradle.sh
+        line: "export GRADLE_HOME={{ gradle_install_dir }}"
+        create: yes
+
+    - name: Add Gradle to PATH
+      lineinfile:
+        path: /etc/profile.d/gradle.sh
+        line: "export PATH=$PATH:$GRADLE_HOME/bin"
+        create: yes
+
+    - name: Verify Gradle installation
+      command: gradle --version
+      register: gradle_version_check
+      changed_when: false
+
+    - name: Display Gradle version
+      debug:
+        var: gradle_version_check.stdout

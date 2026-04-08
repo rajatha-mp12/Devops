@@ -1,0 +1,116 @@
+trigger:
+  branches:
+    include:
+      - master
+
+# ✅ Use your self-hosted agent
+pool:
+  name: 'Default'
+
+variables:
+  MAVEN_CACHE_FOLDER: $(Pipeline.Workspace)/.m2/repository
+  MAVEN_OPTS: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)'
+
+  registryName: 'devopspocacr'
+  repositoryName: 'backend-app'
+  tag: $(Build.BuildId)
+
+  azureSubscription: 'azure-service-conn'
+  resourceGroup: 'my-rg'
+  workingDir: 'experiment-02-maven'
+
+stages:
+
+# ================= BUILD =================
+- stage: Build
+  displayName: 'Build Stage'
+  jobs:
+  - job: MavenBuild
+    displayName: 'Maven Build'
+    pool:
+      name: 'Default'
+    steps:
+
+    - task: Cache@2
+      displayName: 'Cache Maven dependencies'
+      inputs:
+        key: 'maven | "$(Agent.OS)" | $(workingDir)/pom.xml'
+        restoreKeys: |
+          maven | "$(Agent.OS)"
+        path: $(MAVEN_CACHE_FOLDER)
+
+    - task: Maven@4
+      displayName: 'Build Maven Project'
+      inputs:
+        mavenPomFile: '$(workingDir)/pom.xml'
+        goals: 'clean package'
+        options: '-DskipTests'
+        javaHomeOption: 'JDKVersion'
+        jdkVersionOption: '1.17'
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Maven Build Artifact'
+      inputs:
+        targetPath: '$(Build.SourcesDirectory)/$(workingDir)/target'
+        artifact: 'maven-target'
+
+# ================= DOCKER =================
+- stage: BuildAndPushDocker
+  displayName: 'Build and Push Docker Image'
+  dependsOn: Build
+  jobs:
+  - job: DockerBuild
+    displayName: 'Docker Build & Push'
+    pool:
+      name: 'Default'
+    steps:
+
+    - task: DownloadPipelineArtifact@2
+      displayName: 'Download Maven Build Artifact'
+      inputs:
+        artifact: 'maven-target'
+        targetPath: '$(Build.SourcesDirectory)/$(workingDir)/target'
+
+    # ✅ Login to Azure
+    - task: AzureCLI@2
+      displayName: 'Login to Azure'
+      inputs:
+        azureSubscription: $(azureSubscription)
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          az acr login --name $(registryName)
+
+    # ✅ Build Docker image
+    - script: |
+        cd $(workingDir)
+        docker build -t $(registryName).azurecr.io/$(repositoryName):$(tag) .
+      displayName: 'Build Docker Image'
+
+    # ✅ Push Docker image
+    - script: |
+        docker push $(registryName).azurecr.io/$(repositoryName):$(tag)
+      displayName: 'Push Docker Image'
+
+# ================= DEPLOY =================
+- stage: Deploy
+  displayName: 'Deploy to Azure Container App'
+  dependsOn: BuildAndPushDocker
+  jobs:
+  - job: Deploy
+    displayName: 'Deploy'
+    pool:
+      name: 'Default'
+    steps:
+
+    - task: AzureCLI@2
+      displayName: 'Deploy to Container App'
+      inputs:
+        azureSubscription: $(azureSubscription)
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          az containerapp update \
+            --name $(repositoryName) \
+            --resource-group $(resourceGroup) \
+            --image $(registryName).azurecr.io/$(repositoryName):$(tag)
